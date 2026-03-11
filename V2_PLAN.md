@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Post Phase 8B + UI Enhancements + Bug Fixes)
+## Current State (Post Phase 8B + UI Enhancements + Bug Fixes + UI Redesign)
 
 **Branch:** `v2_refactor`
-**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes (model override to gpt-4o-mini, retry loop fix, temperature compat) + Message duplication bug fix in IndexedDB + Model dropdown regression fix. Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest (AES-256-GCM). Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes + Message duplication bug fix + Model dropdown regression fix + UI Redesign (emoji removal, per-API-key save buttons, workspace/sidebar layout with expandable project tree). Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest (AES-256-GCM). Content script integration (Phase 4) still needs live testing on ChatGPT.
 
 ### File structure
 
@@ -17,15 +17,15 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 branchai/
   manifest.json                         # Unified MV3 manifest
   app/
-    index.html                          # Main UI (3-screen layout)
+    index.html                          # Main UI (home screen + workspace with sidebar)
     app.css                             # Dark-first CSS with custom properties
     src/
       main.js                           # Entry point, provider orchestration, screen-based boot
       state.js                          # State management, IndexedDB + chrome.storage.local persistence
       ui.js                             # Screen-based DOM rendering (XSS-safe)
-      utils.js                          # Helpers (genId, escapeHtml, pickDefaultEmoji, timeAgo, etc.)
+      utils.js                          # Helpers (genId, escapeHtml, timeAgo, etc.)
       router.js                         # Minimal screen-based view manager (NEW in Phase 6)
-      icons.js                          # Inline SVG icon strings (NEW in Phase 6, extended: shieldCheck, userX, code)
+      icons.js                          # Inline SVG icon strings (extended: shieldCheck, userX, code, chevronLeft, home)
       crypto.js                         # AES-256-GCM encryption for API keys at rest (NEW in Phase 8A)
       db.js                             # IndexedDB wrapper for per-record storage (NEW in Phase 8B)
       migration.js                      # One-time migration from chrome.storage.local to IndexedDB (NEW in Phase 8B)
@@ -1002,9 +1002,157 @@ This ensures provider/model dropdowns are always repopulated from cache whenever
 
 ---
 
+## UI Redesign: Emoji Removal + Per-Key Save + Workspace/Sidebar Layout — DONE
+
+### Overview
+
+Three-part UI overhaul that removes the emoji system, adds per-provider API key save buttons, and replaces the old 3-screen navigation with a workspace layout featuring a persistent sidebar.
+
+---
+
+### Part 1: Emoji System Removal — DONE
+
+Removed all automatic emoji assignment. Projects/branches no longer get emojis by default. Existing data with user-provided emojis is still displayed (backwards compat).
+
+| File | Changes |
+|------|---------|
+| `app/src/utils.js` | Removed `DEFAULT_EMOJIS` array, `_emojiIdx` counter, and `pickDefaultEmoji()` function |
+| `app/src/state.js` | Removed `pickDefaultEmoji` import; `normalizeState()` defaults `emoji` to `''` instead of calling `pickDefaultEmoji()`; `newProject()` and `newBranch()` default emoji to `''` |
+| `app/src/ui.js` | Removed `pickDefaultEmoji` import; removed `EMOJI_OPTIONS` array; removed emoji picker (label + `.emoji-grid`) from `_openCreateModal()`; emoji display in cards/rows/breadcrumbs now conditional (`p.emoji ? ... : ''`) |
+| `app/src/export_import.js` | Removed `pickDefaultEmoji` import; import defaults emoji to `''` for projects and branches |
+| `app/app.css` | Removed `.emoji-grid` and `.emoji-option` styles (~15 lines) |
+
+---
+
+### Part 2: Per-API-Key Save Buttons — DONE
+
+Each provider's API key section now has its own "Save" button that persists that specific key immediately, separate from the global Save button.
+
+| File | Changes |
+|------|---------|
+| `app/src/ui.js` | Added `<button class="btn-sm btn-save-key" id="saveOpenaiKey">Save</button>` and matching Anthropic button in settings modal HTML; wired `onSaveApiKey` callback for each |
+| `app/src/main.js` | Added `onSaveApiKey(provider, config)` callback in `setCallbacks()` — calls `Object.assign(state.settings[provider], config)` + `persistSettings()` |
+| `app/app.css` | Added `.btn-save-key` style (accent purple background, white text) |
+
+Settings modal API key row layout is now: `[input] [Save] [Test] [Delete?]`
+
+---
+
+### Part 3: Workspace/Sidebar Layout — DONE
+
+Replaced the old 3-screen system (`screen-home`, `screen-project`, `screen-chat` as separate `<main>` elements) with a workspace layout: HOME screen stays as-is, but PROJECT and CHAT screens now render inside a flex workspace with a persistent sidebar.
+
+#### HTML restructure (`app/index.html`)
+
+Old:
+```html
+<main id="screen-home" class="screen active">...</main>
+<main id="screen-project" class="screen">...</main>
+<main id="screen-chat" class="screen">...</main>
+```
+
+New:
+```html
+<main id="screen-home" class="screen active">...</main>
+<div id="workspace" class="workspace" style="display:none;">
+  <aside id="sidebar" class="sidebar">
+    <div id="sidebar-content"></div>
+  </aside>
+  <div id="workspace-main">
+    <div id="workspace-content"></div>
+  </div>
+</div>
+```
+
+Chat screen HTML (subtitle, messages, input bar) is no longer static in `index.html` — it's dynamically generated by `renderChatInto()`.
+
+#### New icons (`app/src/icons.js`)
+
+| Icon | Description |
+|------|-------------|
+| `chevronLeft` | Left-pointing chevron for sidebar back button |
+| `home` | House icon (available but not currently used in sidebar) |
+
+#### State changes (`app/src/state.js`)
+
+Added two runtime-only properties (not persisted):
+- `sidebarCollapsed: false` — tracks sidebar state
+- `_sidebarExpanded: true` — tracks whether active project's branch list is expanded in sidebar
+
+#### Screen activation (`app/src/ui.js` — `activateScreen()`)
+
+Old: toggled `.active` class on `.screen` elements.
+
+New:
+- HOME: show `#screen-home`, hide `#workspace`
+- PROJECT/CHAT: hide `#screen-home`, show `#workspace` (flex)
+
+#### Sidebar rendering (`app/src/ui.js` — `renderSidebar()`)
+
+Unified sidebar for both PROJECT and CHAT screens. Always full-width (280px). Shows all projects as expandable tree nodes:
+
+```
+← Projects              (back to HOME)
+▶ Scratchpad            (collapsed — click to expand)
+    1 branch
+▼ Car Wash Project      (expanded — active project)
+    2 branches
+    ├─ Branch @ msg 8   (click → CHAT)
+    └─ Branched from Chat ● (active branch, highlighted)
+```
+
+Behavior:
+- Clicking a project toggles its branch sub-list open/closed
+- Clicking a different project switches active project + expands its branches
+- Clicking a branch navigates to CHAT for that branch
+- Active branch highlighted with accent-colored left border
+- Back button ("← Projects") navigates to HOME
+
+#### Branch rendering (`app/src/ui.js` — `renderBranchesInto(el)`)
+
+Renamed from `renderBranchesScreen()`. Now takes a target element parameter instead of looking up `$('project-content')`. Renders into `#workspace-content`.
+
+#### Chat rendering (`app/src/ui.js` — `renderChatInto(container)`)
+
+Renamed from `renderChatScreen()`. Dynamically creates the entire chat DOM (subtitle, messages, input bar, send button) inside the provided container. Old code relied on static HTML elements in `index.html`.
+
+#### Main render (`app/src/ui.js` — `renderAll()`)
+
+Updated dispatch:
+- HOME: `renderProjectsScreen()` into `#home-content` (unchanged)
+- PROJECT: `renderSidebar()` + `renderBranchesInto(#workspace-content)`
+- CHAT: `renderSidebar()` + `renderChatInto(#workspace-content)` with `.chat-mode` class
+
+#### Sidebar collapse logic (`app/src/main.js`)
+
+`onScreenChange` sets `state.sidebarCollapsed` based on screen (false for PROJECT, true for CHAT). Sidebar renders identically in both cases (full-width tree).
+
+#### CSS (`app/app.css`)
+
+~80 lines of new workspace/sidebar styles:
+
+| Class | Key Styles |
+|-------|------------|
+| `.workspace` | `display: flex`, `height: calc(100vh - 57px)` |
+| `.sidebar` | `width: 280px`, `border-right`, `overflow-y: auto`, `flex-shrink: 0`, `background: var(--surface)` |
+| `.sidebar-back-btn` | Flex row with chevron-left icon, hover highlight |
+| `.sidebar-project-group` | Container for project item + expandable branch list |
+| `.sidebar-item` | Flex row with chevron toggle + project name/meta |
+| `.sidebar-item-chevron` | Rotates 90deg when `.expanded` |
+| `.sidebar-branches` | Hidden by default, shown with `.open` class |
+| `.sidebar-branch` | Indented (34px left padding), top border separator |
+| `.sidebar-branch.active` | Accent-soft background + 3px accent left border |
+| `#workspace-main` | `flex: 1`, `overflow-y: auto`, `min-width: 0` |
+| `#workspace-content` | `max-width: 1100px`, centered, padded |
+| `#workspace-content.chat-mode` | Full width, no padding, `height: calc(100vh - 57px)` |
+
+Removed old collapsed sidebar styles (~25 lines): `.sidebar.collapsed`, `.sidebar-collapsed-content`, `.sidebar-collapsed-project`, `.sidebar-collapsed-branch` (vertical text writing-mode).
+
+---
+
 ## Resume Point
 
-**Phases 1–8B complete + Settings UX fixes + Privacy section + Summarization fixes + Message duplication fix done.** Next steps:
+**Phases 1–8B complete + Settings UX fixes + Privacy section + Summarization fixes + Message duplication fix + UI Redesign (emoji removal, per-key save, workspace/sidebar) done.** Next steps:
 - Live-test content script integration on ChatGPT (Phase 4 verification)
 - Polish: empty state illustrations, loading skeletons, keyboard shortcuts
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
