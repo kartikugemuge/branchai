@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
+    "https://claude.ai/*",
     "http://localhost:11434/*",
     "https://api.openai.com/*",
     "https://api.anthropic.com/*"
@@ -25,6 +26,14 @@
         "https://chatgpt.com/*"
       ],
       "js": ["content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": ["content/claude_content.js"],
       "css": ["content/content.css"],
       "run_at": "document_idle"
     }

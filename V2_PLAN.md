@@ -6,10 +6,10 @@ A Chrome Extension that lets you fork ChatGPT conversations into a branching wor
 
 ---
 
-## Current State (Post Phase 8B + UI Enhancements + Bug Fixes)
+## Current State (Post Phase 9: Multi-Platform Content Script)
 
-**Branch:** `v2_refactor`
-**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes (model override to gpt-4o-mini, retry loop fix, temperature compat) + Message duplication bug fix in IndexedDB + Model dropdown regression fix. Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. One-time migration from legacy blob runs automatically on first boot. API keys encrypted at rest (AES-256-GCM). Content script integration (Phase 4) still needs live testing on ChatGPT.
+**Branch:** `main`
+**Status:** Phases 1–8B complete + Settings UX fixes + Privacy section on home page + Summarization bug fixes + Message duplication fix + Model dropdown regression fix + Phase 9 (ChatGPT selector fix + Claude.ai content script). Branch buttons now inject on both ChatGPT and Claude.ai. Project/branch/message data stored in IndexedDB (per-record read/write). Settings in `chrome.storage.local`. API keys encrypted at rest (AES-256-GCM).
 
 ### File structure
 
@@ -40,7 +40,8 @@ branchai/
     background.js                       # Service worker (icon click + context handoff)
   content/
     content.js                          # ChatGPT page injector
-    content.css                         # Branch button styling
+    claude_content.js                   # Claude.ai page injector (NEW in Phase 9)
+    content.css                         # Branch button styling (glassmorphism, shared)
   icons/
     icon16.png, icon48.png, icon128.png # Placeholder icons
   mockups/                              # UI reference mockups (untracked)
@@ -101,11 +102,11 @@ branch-chat-ext/      # Old Chrome extension (replaced by new root-level structu
 
 ---
 
-## Phase 4: Content script integration — NEEDS TESTING
+## Phase 4: Content script integration — DONE (verified live)
 
-- Test ChatGPT page → branch button → extension opens with scraped context
-- Verify `chrome.storage.session` handoff from background.js to app page
-- Verify late context injection (ctx-ready event)
+- ChatGPT page → branch button → extension opens with scraped context ✓
+- `chrome.storage.session` handoff from background.js to app page ✓
+- Late context injection (ctx-ready event) ✓
 
 ---
 
@@ -1002,10 +1003,81 @@ This ensures provider/model dropdowns are always repopulated from cache whenever
 
 ---
 
+## Phase 9: Multi-Platform Content Script (ChatGPT fix + Claude.ai) — DONE
+
+### Problem
+
+1. **ChatGPT selector broke** — ChatGPT removed `article` tags from conversation turns. Old selector `article[data-testid^="conversation-turn-"]` returned 0 matches.
+2. **Claude.ai had no injector** — BranchAI only supported ChatGPT. Claude.ai needed a separate content script.
+
+### ChatGPT fix (`content/content.js`)
+
+| Change | Detail |
+|--------|--------|
+| Selector fix | `article[data-testid^="conversation-turn-"]` → `[data-testid^="conversation-turn-"]` (ChatGPT dropped the `article` wrapper) |
+
+### New file: `content/claude_content.js`
+
+Claude.ai DOM structure (verified via live console inspection):
+
+```
+grandparent div (conversation container, ~50 children)
+  └── DIV (empty class, one wrapper per turn)
+      └── DIV.mb-1.mt-6.group   ← human turn
+         or DIV.group            ← assistant turn (no mt-6 class)
+```
+
+Key facts:
+- Human turns: `[data-testid="user-message"]` inside `.mt-6.group` container
+- Assistant turns: `.group` sibling with no `mt-6` class — no testid
+- Conversation container reached via: `user-message → closest('.mt-6') → parentElement → parentElement`
+- Title: `[data-testid="chat-title-button"]` innerText
+- Claude.ai is a SPA — navigation between chats changes URL without full page reload; handled via URL polling in MutationObserver callback + `scheduleRetry()` reset
+
+Role detection:
+```js
+function roleOf(el) {
+  return el.classList.contains('mt-6') ? 'user' : 'assistant';
+}
+```
+
+Text extraction:
+- Human: `el.querySelector('[data-testid="user-message"]').innerText` (avoids action bar text)
+- Assistant: clone → strip buttons/SVGs → `innerText`
+
+### Updated: `content/content.css`
+
+Replaced flat white button with glassmorphism style shared by both ChatGPT and Claude.ai injectors:
+
+- `backdrop-filter: blur(10px) saturate(160%)` for glass effect
+- `color-mix(in srgb, currentColor 8%, transparent)` background — adapts automatically to dark/light parent text color
+- Same technique for border: `color-mix(in srgb, currentColor 18%, transparent)`
+- `opacity: 0` by default, `1` on `*:hover > .branch-chat-btn`
+- Scale micro-interaction on hover (`transform: scale(1.04)`) and active (`scale(0.97)`)
+
+### Updated: `manifest.json`
+
+| Change | Detail |
+|--------|--------|
+| Added host permission | `https://claude.ai/*` |
+| Added content script entry | `claude_content.js` + `content.css` matching `https://claude.ai/*` at `document_idle` |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `content/content.js` | Removed `article` from MSG_SELECTOR |
+| `content/claude_content.js` | New file — full Claude.ai injector with DOM traversal, SPA nav handling, 20-retry loop |
+| `content/content.css` | Replaced flat button with glassmorphism style using `color-mix` + `backdrop-filter` |
+| `manifest.json` | Added `claude.ai` host permission + second `content_scripts` entry |
+
+---
+
 ## Resume Point
 
-**Phases 1–8B complete + Settings UX fixes + Privacy section + Summarization fixes + Message duplication fix done.** Next steps:
-- Live-test content script integration on ChatGPT (Phase 4 verification)
-- Polish: empty state illustrations, loading skeletons, keyboard shortcuts
+**Phases 1–9 complete.** Next steps:
+- Privacy policy page (required for Chrome Web Store submission)
+- Store listing assets: screenshots at 1280×800, promotional tile 440×280
+- Replace placeholder icons with real branded icons
 - Remove legacy `branch-host/` and `branch-chat-ext/` directories
-- Real extension icons (replace placeholders)
+- Decide on `localhost` host permission strategy for Chrome Web Store review

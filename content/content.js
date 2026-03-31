@@ -1,7 +1,7 @@
 // content/content.js — ChatGPT branch injector
 console.log("[BranchAI] content script loaded");
 
-const MSG_SELECTOR = 'article[data-testid^="conversation-turn-"]';
+const MSG_SELECTOR = '[data-testid^="conversation-turn-"]';
 
 function roleOf(el) {
   const child = el.querySelector('[data-message-author-role]');

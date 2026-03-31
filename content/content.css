@@ -1,15 +1,40 @@
 .branch-chat-btn {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  font: 12px/1.2 system-ui, sans-serif;
-  padding: 2px 8px;
+  top: 10px;
+  right: 12px;
+  z-index: 999;
+  font: 500 11px/1 system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+  padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(0,0,0,.15);
-  background: rgba(255,255,255,.9);
+  /* Glass — works on both dark and light parents via color-mix */
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  backdrop-filter: blur(10px) saturate(160%);
+  -webkit-backdrop-filter: blur(10px) saturate(160%);
+  box-shadow:
+    0 2px 10px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 color-mix(in srgb, currentColor 12%, transparent);
+  color: inherit;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .15s ease;
+  transition: opacity 0.18s ease, background 0.18s ease, transform 0.15s ease;
+  white-space: nowrap;
+  user-select: none;
 }
-*:hover > .branch-chat-btn { opacity: 1; }
-.branch-chat-btn:hover { background: #f6f6f6; }
+
+*:hover > .branch-chat-btn,
+*:focus-within > .branch-chat-btn {
+  opacity: 1;
+}
+
+.branch-chat-btn:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  border-color: color-mix(in srgb, currentColor 28%, transparent);
+  transform: scale(1.04);
+}
+
+.branch-chat-btn:active {
+  transform: scale(0.97);
+}
