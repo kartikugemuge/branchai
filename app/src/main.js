@@ -1,11 +1,12 @@
 // main.js — provider-based orchestration (screen-based UI)
-import { loadInitial, persist, persistSettings, persistBranchMessages, persistBranchMetadata, state, currentBranch, currentProject, updateSettings } from './state.js';
+import { loadInitial, persist, persistSettings, persistBranchMessages, persistBranchMetadata, state, currentBranch, currentProject, updateSettings, newBranch } from './state.js';
 import { putProject } from './db.js';
 import { renderAll, setModelStatus, getSettingsValues, setCurrentModelId, setCallbacks, appendStreamingBubble, updateStreamingContent } from './ui.js';
 import { getProvider, listProviders } from './providers/registry.js';
 import { SCREENS, navigateTo, onScreenChange, getCurrentScreen } from './router.js';
 import { now } from './utils.js';
 import { summarizeBranch } from './summarize.js';
+import { compactMessages } from './compact.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -389,6 +390,57 @@ setCallbacks({
   onChatRender: () => {
     repopulateModelsFromCache();
     populateProviders();
+  },
+  onGenerateSummary: async (seedMessages, anchorIdx) => {
+    if (!activeProvider) throw new Error('No provider connected');
+    const model = currentModelId || state.settings.defaultModel;
+    if (!model) throw new Error('No model selected');
+    return await summarizeBranch(activeProvider, model, {
+      messages: seedMessages,
+      branchedFromMsg: anchorIdx,
+    });
+  },
+  onCompactChat: async () => {
+    const b = currentBranch();
+    const p = currentProject();
+    if (!b || !p) throw new Error('No branch selected');
+    if (!activeProvider) throw new Error('No provider connected');
+    const model = $('modelSel')?.value || currentModelId;
+    if (!model || ['--', 'loading...', 'no models found', 'no models available'].includes(model)) {
+      throw new Error('No model selected');
+    }
+    const TAIL = 4;
+    const msgs = b.messages;
+    if (msgs.length < TAIL + 2) throw new Error('Not enough messages to compact');
+
+    const toCompact = msgs.slice(0, msgs.length - TAIL);
+    const tail = msgs.slice(msgs.length - TAIL);
+    const summary = await compactMessages(activeProvider, model, toCompact);
+
+    const seedMsgs = [
+      {
+        role: 'user',
+        content: `[Previous conversation recap — use this as context; continue naturally from the tail below.]\n\n${summary}`,
+        ts: now(),
+      },
+      { role: 'assistant', content: 'Understood. I have the recap.', ts: now() },
+      ...tail.map(m => ({ ...m })),
+    ];
+
+    const newBr = newBranch(
+      `Compacted \u00B7 ${b.title}`,
+      seedMsgs,
+      null,
+      { description: `Compacted from "${b.title}" (${msgs.length} messages condensed)` },
+    );
+    if (newBr) {
+      newBr.provider = b.provider || activeProvider.id;
+      newBr.model = b.model || model;
+      await persistBranchMetadata(newBr, p.id);
+      renderAll();
+      await syncBranchProvider();
+      wireChatInput();
+    }
   },
   onSaveApiKey: (provider, config) => {
     if (state.settings[provider]) {

@@ -60,11 +60,6 @@ function addPill(el) {
   btn.className = 'branch-chat-btn';
   btn.textContent = 'branch';
   btn.title = 'Branch from here \u2192 BranchAI';
-  Object.assign(btn.style, {
-    position: 'absolute', right: '8px', top: '8px',
-    padding: '4px 8px', border: '1px solid #ddd', borderRadius: '8px',
-    background: '#fff', fontSize: '12px', cursor: 'pointer', zIndex: 10,
-  });
 
   btn.addEventListener('click', (ev) => {
     ev.stopPropagation();

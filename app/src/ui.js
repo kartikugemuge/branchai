@@ -84,6 +84,10 @@ function renderHeader() {
   } else if (screen === SCREENS.CHAT) {
     const p = currentProject();
     const b = currentBranch();
+    const msgCount = Array.isArray(b?.messages) ? b.messages.length : 0;
+    const compactBtn = msgCount >= 6
+      ? `<button class="btn-compact" id="compactBtn" title="Summarize this chat into a new compacted branch">${ICONS.compress} Compact</button>`
+      : '';
     header.innerHTML = `
       <div class="header-left">
         <button class="back-btn" id="navBack" title="Back to branches">${ICONS.backArrow}</button>
@@ -104,6 +108,7 @@ function renderHeader() {
         </div>
         <span id="modelStatus" class="status-pill status-connecting">starting...</span>
         <span id="tokenInfo" class="token-badge"></span>
+        ${compactBtn}
         <button class="icon-btn" id="themeToggle" title="Toggle theme">${themeIcon()}</button>
         <button class="icon-btn" id="settingsBtn" title="Settings">${ICONS.gear}</button>
       </div>`;
@@ -170,6 +175,22 @@ function wireHeaderEvents() {
     const modSel = $('modelSel');
     if (provSel) provSel.onchange = (e) => _callbacks.onProviderChange?.(e);
     if (modSel) modSel.onchange = (e) => _callbacks.onModelChange?.(e);
+
+    const compactBtn = $('compactBtn');
+    if (compactBtn) compactBtn.onclick = async () => {
+      if (!confirm('Compact this chat? A new branch will be created with an AI-generated summary of the earlier messages plus the last 4 messages verbatim. The current branch stays untouched.')) return;
+      const orig = compactBtn.innerHTML;
+      compactBtn.disabled = true;
+      compactBtn.innerHTML = `${ICONS.compress} Compacting...`;
+      try {
+        await _callbacks.onCompactChat?.();
+      } catch (e) {
+        alert('Compaction failed: ' + (e?.message || e));
+      } finally {
+        compactBtn.disabled = false;
+        compactBtn.innerHTML = orig;
+      }
+    };
   }
 }
 
@@ -441,8 +462,20 @@ function renderChatInto(container) {
       btn.addEventListener('click', () => {
         const i = Number(btn.dataset.branchIdx);
         const seed = messages.slice(0, i + 1);
-        newBranch(`Branch @ msg ${i + 1}`, seed, i);
-        navigateTo(SCREENS.PROJECT);
+        _openCreateModal(
+          'Branch from here',
+          'Branch name',
+          (name, desc) => {
+            newBranch(name, seed, i, { description: desc });
+            navigateTo(SCREENS.CHAT);
+          },
+          {
+            defaultName: `Branch @ msg ${i + 1}`,
+            aiGenerate: _callbacks.onGenerateSummary
+              ? () => _callbacks.onGenerateSummary(seed, i)
+              : null,
+          }
+        );
       });
     });
 
@@ -916,9 +949,16 @@ function openNewBranchModal(onSave) {
   _openCreateModal('New Branch', 'Branch name', onSave);
 }
 
-function _openCreateModal(title, namePlaceholder, onSave) {
+function _openCreateModal(title, namePlaceholder, onSave, opts = {}) {
   const existing = $('createModal');
   if (existing) existing.remove();
+
+  const { defaultName = '', aiGenerate = null } = opts;
+
+  const aiBtnHtml = aiGenerate ? `
+    <button class="btn-ai-generate" id="aiGenerateBtn" type="button">
+      ${ICONS.sparkle} Auto-generate with AI
+    </button>` : '';
 
   const modal = document.createElement('div');
   modal.id = 'createModal';
@@ -931,8 +971,9 @@ function _openCreateModal(title, namePlaceholder, onSave) {
       </div>
       <div class="modal-body">
         <div class="create-form">
-          <input type="text" id="createName" placeholder="${escapeHtml(namePlaceholder)}" autofocus />
-          <textarea id="createDesc" placeholder="Description (optional)" rows="2"></textarea>
+          <input type="text" id="createName" placeholder="${escapeHtml(namePlaceholder)}" value="${escapeHtml(defaultName)}" autofocus />
+          <textarea id="createDesc" placeholder="Summary (optional)" rows="3"></textarea>
+          ${aiBtnHtml}
         </div>
       </div>
       <div class="modal-footer">
@@ -960,5 +1001,29 @@ function _openCreateModal(title, namePlaceholder, onSave) {
     }
   });
 
-  setTimeout(() => $('createName')?.focus(), 50);
+  if (aiGenerate) {
+    const aiBtn = $('aiGenerateBtn');
+    aiBtn.onclick = async () => {
+      const descEl = $('createDesc');
+      const originalHtml = aiBtn.innerHTML;
+      aiBtn.disabled = true;
+      aiBtn.innerHTML = `${ICONS.sparkle} Generating...`;
+      try {
+        const text = await aiGenerate();
+        if (text) descEl.value = text;
+      } catch (e) {
+        descEl.placeholder = 'AI generation failed: ' + (e?.message || e);
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.innerHTML = originalHtml;
+      }
+    };
+  }
+
+  setTimeout(() => {
+    const el = $('createName');
+    if (!el) return;
+    el.focus();
+    if (defaultName) el.select();
+  }, 50);
 }
